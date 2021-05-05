@@ -48,6 +48,7 @@ I also wrote a simple random move choice bot
 
 """
 from random import choice
+import sys
 
 import pygame
 from pygame import Surface, Rect
@@ -63,6 +64,9 @@ from tokens import tokens as tk
 
 SW = 96
 SCREEN = pygame.display.set_mode((SW*10, SW*10))
+
+WHITE = "human" if "-w" not in sys.argv else sys.argv[sys.argv.index("-w") + 1]
+BLACK = "random" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
 
 COLORS = {
     "black square" : (82,52,29),
@@ -81,14 +85,14 @@ PIECE_MAP = {
 }
 
 NEW_BOARD = [
-    ['R', 'N', 'B', 'K', 'Q', 'B', 'N', 'R'],
+    ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'],
     ['P']*8,
     [None]*8,
     [None]*8,
     [None]*8,
     [None]*8,
     ['p']*8,
-    ['r', 'n', 'b', 'k', 'q', 'b', 'n', 'r']
+    ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r']
 ]
 BOARD = NEW_BOARD.copy()
 TURN = 'white'
@@ -96,6 +100,11 @@ TURN = 'white'
 CAN_EN_PASSANT = {
     'white': [False] * 8,
     'black': [False] * 8,
+}
+
+CAN_CASTLE = {
+    'white': [True, True],
+    'black': [True, True],
 }
 
 #########################
@@ -203,7 +212,7 @@ def queen_moves(pos, color):
 
 
 def king_moves(pos, color):
-    # TODO: CASTLING
+    # TODO: CHECK FOR CHECKS ON CASTLING
     x, y = pos
     moves = []
     for dx, dy in [(1, -1), (1, 0), (1, 1),
@@ -211,6 +220,13 @@ def king_moves(pos, color):
                    (-1,-1),(-1, 0),(-1, 1)]:
         if can_move((x+dx, y+dy), color):
             moves.append((pos, (x+dx, y+dy)))
+
+    # castle
+    castle_y = 0 if color == 'white' else 7
+    if CAN_CASTLE[color][0] and not any(BOARD[castle_y][1:4]):
+        moves.append((pos, (2, castle_y)))
+    if CAN_CASTLE[color][1] and not any(BOARD[castle_y][5:7]):
+        moves.append((pos, (6, castle_y)))
     return moves
 
 GET_MOVES_MAP = {
@@ -243,17 +259,39 @@ def apply_move(move):
     pos1, pos2 = move
     x1, y1 = pos1
     x2, y2 = pos2
-
+    col = get_color(BOARD[y1][x1])        
+    
     # en passant check
     if BOARD[y1][x1] in 'Pp' and x1 != x2 and BOARD[y2][x2] == None:
-        if get_color(BOARD[y1][x1]) == 'white':
+        if col == 'white':
             BOARD[y2-1][x2] = None
         else:
             BOARD[y2+1][x2] = None
-    
+
+    # castle checks
+    if BOARD[y1][x1] in 'Kk':
+        if abs(x2 - x1) > 1:
+            if x2 - x1 > 0:
+                BOARD[y1][5] = BOARD[y1][7]
+                BOARD[y1][7] = None
+            else:
+                BOARD[y1][3] = BOARD[y1][0]
+                BOARD[y1][0] = None
+
+        CAN_CASTLE[col] = [False, False]
+
     BOARD[y2][x2] = BOARD[y1][x1]
     BOARD[y1][x1] = None
-    
+
+    if CAN_CASTLE['white'][0] and BOARD[0][0] != "R":
+        CAN_CASTLE['white'][0] = False
+    if CAN_CASTLE['white'][1] and BOARD[0][7] != "R":
+        CAN_CASTLE['white'][1] = False
+    if CAN_CASTLE['black'][0] and BOARD[7][0] != "r":
+        CAN_CASTLE['black'][0] = False
+    if CAN_CASTLE['black'][1] and BOARD[7][7] != "r":
+        CAN_CASTLE['black'][1] = False
+
 
 
 def check_promotions(piece_choice_func):
@@ -330,6 +368,11 @@ def autoqueen(pos, col):
     return 'Q' if col == 'white' else 'q'
 
 
+PLAYERS = {
+    "human": [human_move_select, autoqueen],
+    "random": [random_move, random_promote],
+}
+
 #########################
 #                       #
 # PYGAME SPECIFIC DRAW  #
@@ -362,9 +405,9 @@ def run(white_move_choice, white_promotion_func, black_move_choice, black_promot
         SCREEN.fill((150, 150, 150))
         SCREEN.blit(drawn_board(), (SW, SW))
         for x in range(1, 9):
-            tk.draw_token(SCREEN, "{}".format(x), (x*SW, SW*9), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
+            tk.draw_token(SCREEN, "{}".format("_ABCDEFGH"[x]), (x*SW, SW*9), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
         for y in range(1, 9):
-            tk.draw_token(SCREEN, "{}".format("_ABCDEFGH"[y]), (0, SW*(9-y)), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
+            tk.draw_token(SCREEN, "{}".format(y), (0, SW*(9-y)), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
 
         moves = get_moves(TURN)
         if (moves):
@@ -397,6 +440,6 @@ def run(white_move_choice, white_promotion_func, black_move_choice, black_promot
 
 
 if __name__ == "__main__":
-    run(human_move_select, autoqueen, random_move, random_promote)
+    run(PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
 
                 

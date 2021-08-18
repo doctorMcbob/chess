@@ -46,8 +46,34 @@ EN PASSANT DONE :)))
 And even better, to test it I wrote human player move choice
 I also wrote a simple random move choice bot
 
+-------
+
+Okay rethinking this, as I start to have to look ahead in turns
+im going to have to keep track of en passant and castle states for each board state.
+
+perhaps a generic BOARD_STATE dictionary can be passed around and created.
+
+CURRENT_STATE = { # at the beginning
+   en_passant : {
+      white : [...],
+      black : [...]
+   },
+   castle : {
+      white : [...],
+      black : [...]
+   },
+   board : [[...], [...], ...] 
+
+CURRENT_STATE = apply_turn(CURRENT_STATE) <-- returns a new board state
+
+========
+god hath forsaken us and I am coming back to this project after like 6 months
+
+implementing current state changes. information for whose turn it is will also live in the CURRENT_STATE
+
 """
 from random import choice
+from copy import deepcopy
 import sys
 
 import pygame
@@ -106,6 +132,22 @@ CAN_CASTLE = {
     'white': [True, True],
     'black': [True, True],
 }
+CURRENT_STATE = {
+    "board": NEW_BOARD.copy(),
+    "turn": "white",
+    
+    "can castle": {
+        "white": [True, True],
+        "black": [True, True],
+    },
+    "can en passant": {
+        "white": [False] * 8,
+        "black": [False] * 8,
+    }
+    
+}
+
+STATE_STACK = []
 
 #########################
 #                       #
@@ -113,49 +155,96 @@ CAN_CASTLE = {
 #                       #
 #########################
 
+def pretty_print_board(board):
+    print("@   0  1  2  3  4  5  6  7")
+    for y, row in enumerate(board):
+        print("  -" + "---" * 8)
+        pretty_row = "{} |".format(y)
+        for piece in row:
+            pretty_row += "  |" if piece is None else "{} |".format(piece)
+        print(pretty_row)
+    print("  -" + "---" * 8)
+
+
 def get_color(piece):
     return "white" if piece.isupper() else "black"
 
 
-def can_move(pos, color):
+def can_move(board, pos, color):
     x, y = pos
     if x < 0 or y < 0: return False
     try:
-        return BOARD[y][x] is None or get_color(BOARD[y][x]) != color
+        return board[y][x] is None or get_color(board[y][x]) != color
     except IndexError:
         return False
 
 
-def check_lateral(pos, color):
+def check_lateral(board, pos, color):
     moves = []
     for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
         x, y = pos
         while 0 <= x < 8 and 0 <= y < 8:
             x += dx
             y += dy
-            if can_move((x, y), color):
+            if can_move(board, (x, y), color):
                 moves.append((pos, (x, y)))
-                if BOARD[y][x] is not None:
+                if board[y][x] is not None:
                     break
             else:
                 break
     return moves
 
 
-def check_diagonal(pos, color):
+def check_diagonal(board, pos, color):
     moves = []
     for dx, dy in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
         x, y = pos
         while 0 <= x < 8 and 0 <= y < 8:
             x += dy
             y += dx
-            if can_move((x, y), color):
+            if can_move(board, (x, y), color):
                 moves.append((pos, (x, y)))
-                if BOARD[y][x] is not None:
+                if board[y][x] is not None:
                     break
             else:
                 break
     return moves
+
+
+def get_moves(state, color):
+    moves = []
+    print("moves", state)
+    for y, row in enumerate(state["board"]):
+        for x, piece in enumerate(row):
+            if piece is None: continue
+            if get_color(piece) == color:
+                for key in GET_MOVES_MAP:
+                    if piece in key:
+                        moves += GET_MOVES_MAP[key](state, (x, y), color)
+    return moves
+
+
+def get_legal_moves(state, color, debug=[]):
+    moves = get_moves(state, color)
+    legal_moves = []
+    for move in moves:
+        if color in debug: pretty_print_board(apply_move(state, move)["board"])
+        if not in_check(apply_move(state, move)):
+            if color in debug: print('legal')
+            legal_moves.append(move)
+        elif color in debug:
+            print('ilegal')
+    return legal_moves
+
+
+def in_check(state):
+    col = "white" if state["turn"] == "black" else "black"
+    for move in get_moves(state, col):
+        x, y = move[1]
+        if state["board"][y][x] == ('K' if state["turn"] == 'white' else 'k'):
+            return True
+    return False
+
 
 #########################
 #                       #
@@ -163,69 +252,71 @@ def check_diagonal(pos, color):
 #                       #
 #########################
 
-def pawn_moves(pos, color):
+def pawn_moves(state, pos, color): 
     x, y = pos
     moves = []
     d = 1 if color == 'white' else -1
-    if 0 <= y+d < 8 and BOARD[y+d][x] is None:
+    # basic movement
+    if 0 <= y+d < 8 and state["board"][y+d][x] is None:
         moves.append((pos, (x, y+d)))
+    # check first move
     if (d == 1 and y == 1) or (d == -1 and y == 6):
-        if BOARD[y+d][x] is None and BOARD[y+(d*2)][x] is None:
+        if state["board"][y+d][x] is None and state["board"][y+(d*2)][x] is None:
             moves.append((pos, (x, y+(d*2))))
     # capture
     if x+1 < 8 and 0 < y+d < 8:
-        if BOARD[y+d][x+1] is not None and get_color(BOARD[y+d][x+1]) != color:
+        if state["board"][y+d][x+1] is not None and get_color(state["board"][y+d][x+1]) != color:
             moves.append((pos, (x+1, y+d)))
     if 0 <= x-1 and 0 < y+d < 8:
-        if BOARD[y+d][x-1] is not None and get_color(BOARD[y+d][x-1]) != color:
+        if state["board"][y+d][x-1] is not None and get_color(state["board"][y+d][x-1]) != color:
             moves.append((pos, (x-1, y+d)))
     # en passant
     if (d == 1 and y == 4) or (d == -1 and y == 3):
-        if x+1 < 8 and CAN_EN_PASSANT[color][x+1]:
+        if x+1 < 8 and state["can en passant"][color][x+1]:
             moves.append((pos, (x+1, y+d)))
-        if 0 <= x-1 and CAN_EN_PASSANT[color][x-1]:
+        if 0 <= x-1 and state["can en passant"][color][x-1]:
             moves.append((pos, (x-1, y+d)))
 
     return moves
 
 
-def rook_moves(pos, color):
-    return check_lateral(pos, color)
+def rook_moves(state, pos, color):
+    return check_lateral(state["board"], pos, color)
 
 
-def knight_moves(pos, color):
+def knight_moves(state, pos, color):
     x, y = pos
     moves = []
     for dx, dy in [(2, 1), (2, -1), (-2, 1), (-2, -1),
                    (1, 2), (-1, 2), (1, -2), (-1, -2)]:
-        if can_move((x+dx, y+dy), color):
+        if can_move(state["board"], (x+dx, y+dy), color):
             moves.append((pos, (x+dx, y+dy))) 
     return moves
 
 
-def bishop_moves(pos, color):
-    return check_diagonal(pos, color)
+def bishop_moves(state, pos, color):
+    return check_diagonal(state["board"], pos, color)
 
 
-def queen_moves(pos, color):
-    return check_lateral(pos, color) + check_diagonal(pos, color)
+def queen_moves(state, pos, color):
+    return check_lateral(state["board"], pos, color) + check_diagonal(state["board"], pos, color)
 
 
-def king_moves(pos, color):
+def king_moves(state, pos, color):
     # TODO: CHECK FOR CHECKS ON CASTLING
     x, y = pos
     moves = []
     for dx, dy in [(1, -1), (1, 0), (1, 1),
                    (0, -1),         (0, 1),
                    (-1,-1),(-1, 0),(-1, 1)]:
-        if can_move((x+dx, y+dy), color):
+        if can_move(state["board"], (x+dx, y+dy), color):
             moves.append((pos, (x+dx, y+dy)))
 
     # castle
     castle_y = 0 if color == 'white' else 7
-    if CAN_CASTLE[color][0] and not any(BOARD[castle_y][1:4]):
+    if state["can castle"][color][0] and not any(state["board"][castle_y][1:4]):
         moves.append((pos, (2, castle_y)))
-    if CAN_CASTLE[color][1] and not any(BOARD[castle_y][5:7]):
+    if state["can castle"][color][1] and not any(state["board"][castle_y][5:7]):
         moves.append((pos, (6, castle_y)))
     return moves
 
@@ -238,74 +329,66 @@ GET_MOVES_MAP = {
     "Pp": pawn_moves,
 }
 
-def get_moves(color):
-    moves = []
-    for y, row in enumerate(BOARD):
-        for x, piece in enumerate(row):
-            if piece is None: continue
-            for key in GET_MOVES_MAP:
-                if piece in key:
-                    if get_color(piece) == color:
-                        moves += GET_MOVES_MAP[key]((x, y), color)
-    return moves
-
 #########################
 #                       #
 #  GAME FUNCTIONALITY   #
 #                       #
 #########################
 
-def apply_move(move):
+def apply_move(state, move):
+    state = deepcopy(state)
     pos1, pos2 = move
     x1, y1 = pos1
     x2, y2 = pos2
-    col = get_color(BOARD[y1][x1])        
+    col = get_color(state["board"][y1][x1])        
     
     # en passant check
-    if BOARD[y1][x1] in 'Pp' and x1 != x2 and BOARD[y2][x2] == None:
+    if state["board"][y1][x1] in 'Pp' and x1 != x2 and state["board"][y2][x2] == None:
         if col == 'white':
-            BOARD[y2-1][x2] = None
+            state["board"][y2-1][x2] = None
         else:
-            BOARD[y2+1][x2] = None
+            state["board"][y2+1][x2] = None
 
     # castle checks
-    if BOARD[y1][x1] in 'Kk':
+    if state["board"][y1][x1] in 'Kk':
         if abs(x2 - x1) > 1:
             if x2 - x1 > 0:
-                BOARD[y1][5] = BOARD[y1][7]
-                BOARD[y1][7] = None
+                state["board"][y1][5] = state["board"][y1][7]
+                state["board"][y1][7] = None
             else:
-                BOARD[y1][3] = BOARD[y1][0]
-                BOARD[y1][0] = None
+                state["board"][y1][3] = state["board"][y1][0]
+                state["board"][y1][0] = None
 
-        CAN_CASTLE[col] = [False, False]
+        state["can castle"][col] = [False, False]
 
-    BOARD[y2][x2] = BOARD[y1][x1]
-    BOARD[y1][x1] = None
+    state["board"][y2][x2] = state["board"][y1][x1]
+    state["board"][y1][x1] = None
 
-    if CAN_CASTLE['white'][0] and BOARD[0][0] != "R":
-        CAN_CASTLE['white'][0] = False
-    if CAN_CASTLE['white'][1] and BOARD[0][7] != "R":
-        CAN_CASTLE['white'][1] = False
-    if CAN_CASTLE['black'][0] and BOARD[7][0] != "r":
-        CAN_CASTLE['black'][0] = False
-    if CAN_CASTLE['black'][1] and BOARD[7][7] != "r":
-        CAN_CASTLE['black'][1] = False
+    if state["can castle"]['white'][0] and state["board"][0][0] != "R":
+        state["can castle"]['white'][0] = False
+    if state["can castle"]['white'][1] and state["board"][0][7] != "R":
+        state["can castle"]['white'][1] = False
+    if state["can castle"]['black'][0] and state["board"][7][0] != "r":
+        state["can castle"]['black'][0] = False
+    if state["can castle"]['black'][1] and state["board"][7][7] != "r":
+        state["can castle"]['black'][1] = False
+
+    return state
 
 
 
-def check_promotions(piece_choice_func):
-    for x, piece in enumerate(BOARD[7]):
+def check_promotions(state, piece_choice_func):
+    for x, piece in enumerate(state["board"][7]):
         if piece == "P":
-            BOARD[7][x] = piece_choice_func((7, x), 'white')
-    for x, piece in enumerate(BOARD[0]):
+            state["board"][7][x] = piece_choice_func((7, x), 'white')
+    for x, piece in enumerate(state["board"][0]):
         if piece == "p":
-            BOARD[0][x] = piece_choice_func((0, x), 'black')
+            state["board"][0][x] = piece_choice_func((0, x), 'black')
 
 
-def check_game_going():
+def check_game_going(state):
     white, black = False, False
-    for row in BOARD:
+    for row in state["board"]:
         if 'K' in row: white = True
         if 'k' in row: black = True
     return white and black
@@ -316,7 +399,7 @@ def check_game_going():
 #                       #
 #########################
 
-def random_move(moves):
+def random_move(state, moves):
     return choice(moves)
     
 
@@ -324,11 +407,11 @@ def random_promote(pos, col):
     return choice('RNBQ') if col == 'white' else choice('rnbq')
 
 
-def human_move_select(moves):
+def human_move_select(state, moves):
     piece_to_move = None
     moves_for_piece = []
     while True:
-        board = drawn_board()
+        board = drawn_board(state)
         
         if piece_to_move:
             x, y = piece_to_move
@@ -379,14 +462,14 @@ PLAYERS = {
 #                       #
 #########################
 
-def drawn_board():
+def drawn_board(state):
     surf = Surface((SW*8, SW*8))
     for y in range(8):
         for x in range(8):
             col = "black square" if (x + y) % 2 == 1 else "white square"
             pygame.draw.rect(surf, COLORS[col], Rect((SW*x, SW*y), (SW, SW)))
 
-    for y, row in enumerate(BOARD[::-1]):
+    for y, row in enumerate(state["board"][::-1]):
         for x, piece in enumerate(row):
             if piece is None: continue
             colorset = COLORS[get_color(piece) + " piece"]
@@ -399,34 +482,38 @@ def drawn_board():
     return surf
 
 
-def run(white_move_choice, white_promotion_func, black_move_choice, black_promotion_func):
-    global TURN
-    while check_game_going():
+def run(state, white_move_choice, white_promotion_func, black_move_choice, black_promotion_func):
+    while check_game_going(state):
+        STATE_STACK.append(deepcopy(state))
         SCREEN.fill((150, 150, 150))
-        SCREEN.blit(drawn_board(), (SW, SW))
+        SCREEN.blit(drawn_board(state), (SW, SW))
         for x in range(1, 9):
             tk.draw_token(SCREEN, "{}".format("_ABCDEFGH"[x]), (x*SW, SW*9), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
         for y in range(1, 9):
             tk.draw_token(SCREEN, "{}".format(y), (0, SW*(9-y)), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
 
-        moves = get_moves(TURN)
-        if (moves):
-            CAN_EN_PASSANT[TURN] = [False] * 8
-            move = white_move_choice(moves) if TURN == 'white' else black_move_choice(moves)
+        if moves := get_legal_moves(state, state["turn"]):
+            state["can en passant"][state["turn"]] = [False] * 8
+            move = white_move_choice(state, moves) if state["turn"] == 'white' else black_move_choice(state, moves)
 
             pos1, pos2 = move
-            if pos1[1] == 1 and pos2[1] == 3 and BOARD[pos1[1]][pos1[0]] == "P":
-                CAN_EN_PASSANT['black'][pos1[0]] = True
-            if pos1[1] == 6 and pos2[1] == 4 and BOARD[pos1[1]][pos1[0]] == "p":
-                CAN_EN_PASSANT['white'][pos1[0]] = True
-
-            apply_move(move)
-            if TURN == 'white':
-                check_promotions(white_promotion_func)
+            if pos1[1] == 1 and pos2[1] == 3 and state["board"][pos1[1]][pos1[0]] == "P":
+                state["can en passant"]['black'][pos1[0]] = True
+            if pos1[1] == 6 and pos2[1] == 4 and state["board"][pos1[1]][pos1[0]] == "p":
+                state["can en passant"]['white'][pos1[0]] = True
+            
+            state = apply_move(state, move)
+            if state["turn"] == 'white':
+                check_promotions(state, white_promotion_func)
             else:
-                check_promotions(black_promotion_func)
-                
-        TURN = 'white' if TURN == 'black' else 'black'
+                check_promotions(state, black_promotion_func)
+
+        else:
+            if in_check(state):
+                return '{} wins!'.format('white' if state["turn"] == 'black' else 'black')
+            else:
+                return 'stalemate'
+        state["turn"] = 'white' if state["turn"] == 'black' else 'black'
         
         pygame.display.update()
         wait = True
@@ -440,6 +527,7 @@ def run(white_move_choice, white_promotion_func, black_move_choice, black_promot
 
 
 if __name__ == "__main__":
-    run(PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
-
+    print(
+        run(CURRENT_STATE, PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
+    )
                 

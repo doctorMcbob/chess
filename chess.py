@@ -213,7 +213,6 @@ def check_diagonal(board, pos, color):
 
 def get_moves(state, color):
     moves = []
-    print("moves", state)
     for y, row in enumerate(state["board"]):
         for x, piece in enumerate(row):
             if piece is None: continue

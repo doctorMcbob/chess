@@ -70,7 +70,6 @@ CURRENT_STATE = apply_turn(CURRENT_STATE) <-- returns a new board state
 god hath forsaken us and I am coming back to this project after like 6 months
 
 implementing current state changes. information for whose turn it is will also live in the CURRENT_STATE
-
 """
 from random import choice
 from copy import deepcopy
@@ -93,6 +92,8 @@ SCREEN = pygame.display.set_mode((SW*10, SW*10))
 
 WHITE = "human" if "-w" not in sys.argv else sys.argv[sys.argv.index("-w") + 1]
 BLACK = "random" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
+
+DEBUG = "-d" in sys.argv
 
 COLORS = {
     "black square" : (82,52,29),
@@ -227,12 +228,21 @@ def get_legal_moves(state, color, debug=[]):
     moves = get_moves(state, color)
     legal_moves = []
     for move in moves:
-        if color in debug: pretty_print_board(apply_move(state, move)["board"])
+        if debug: pretty_print_board(apply_move(state, move)["board"])
         if not in_check(apply_move(state, move)):
-            if color in debug: print('legal')
+            # check for castle has to live here instead of in king_moves
+            x1, y1 = move[0]
+            x2, y2 = move[1]
+            if state["board"][y1][x1] in "Kk":
+                # if we are moving the king
+                # and the distance we are moving is two
+                if abs(x1 - x2) == 2:
+                    x = x1 - (x1 - x2) // 2 # not hacky :fingers_crossed:
+                    if in_check(apply_move(state, ((x1, y1), (x, y2)))):
+                        continue
+            if debug: print('legal')
             legal_moves.append(move)
-        elif color in debug:
-            print('ilegal')
+        elif debug: print('ilegal')
     return legal_moves
 
 
@@ -491,7 +501,7 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
         for y in range(1, 9):
             tk.draw_token(SCREEN, "{}".format(y), (0, SW*(9-y)), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
 
-        if moves := get_legal_moves(state, state["turn"]):
+        if moves := get_legal_moves(state, state["turn"], debug=DEBUG):
             state["can en passant"][state["turn"]] = [False] * 8
             move = white_move_choice(state, moves) if state["turn"] == 'white' else black_move_choice(state, moves)
 

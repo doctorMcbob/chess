@@ -70,6 +70,14 @@ CURRENT_STATE = apply_turn(CURRENT_STATE) <-- returns a new board state
 god hath forsaken us and I am coming back to this project after like 6 months
 
 implementing current state changes. information for whose turn it is will also live in the CURRENT_STATE
+
+ALAS I HAVE FIXED CASTLING
+
+now we get to do the real experiments
+
+Before we can start playing games we need to start analyzing positions
+
+
 """
 from random import choice
 from copy import deepcopy
@@ -535,8 +543,21 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
                     wait = False
 
 
+def run_turn_count_test(ply, turn=CURRENT_STATE["turn"], state=CURRENT_STATE):
+    pretty_print_board(state["board"])
+    state["turn"] = turn
+    if ply == 0: return 1
+    return sum([run_turn_count_test(ply-1, "white" if state["turn"] == "black" else "black", apply_move(state, move)) for move in get_legal_moves(state, state["turn"])])
+
+    
+    
+
 if __name__ == "__main__":
-    print(
-        run(CURRENT_STATE, PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
-    )
+    if "-t" in sys.argv:
+        v = int(sys.argv[sys.argv.index("-t") + 1])
+        print(run_turn_count_test(v))
+    else:
+        print(
+            run(CURRENT_STATE, PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
+        )
                 

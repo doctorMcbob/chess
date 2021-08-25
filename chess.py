@@ -428,7 +428,7 @@ def check_game_going(state):
 def random_move(state, moves):
     return choice(moves)
 
-def  minimax_by_point_value(state, moves, ply=2):
+def  minimax_by_point_value(state, moves, ply=3):
     color = state["turn"]
     values = [minimax(ply, point_value, color, state=apply_move(state, move), debug=DEBUG) for move in moves]
     best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
@@ -572,7 +572,7 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
 
     if ply == 0: return evaluate_func(state, color, debug=debug)
     moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
-    if ply % 2 == 1:
+    if state["turn"] != color:
         return min(moves, default=-100)
     else:
         return max(moves, default=100)

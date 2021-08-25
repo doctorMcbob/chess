@@ -99,7 +99,7 @@ SW = 96
 SCREEN = pygame.display.set_mode((SW*10, SW*10))
 
 WHITE = "human" if "-w" not in sys.argv else sys.argv[sys.argv.index("-w") + 1]
-BLACK = "random" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
+BLACK = "pvmm" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
 
 DEBUG = "-d" in sys.argv
 
@@ -132,6 +132,15 @@ NEW_BOARD = [
 BOARD = NEW_BOARD.copy()
 TURN = 'white'
 
+PIECE_VALUE = {
+    "Kk": 0.00,
+    "Pp": 1.00,
+    "Bb": 3.01,
+    "Nn": 3.00,
+    "Rr": 5.01,
+    "Qq": 9.01,
+}
+
 CAN_EN_PASSANT = {
     'white': [False] * 8,
     'black': [False] * 8,
@@ -153,7 +162,6 @@ CURRENT_STATE = {
         "white": [False] * 8,
         "black": [False] * 8,
     }
-    
 }
 
 STATE_STACK = []
@@ -232,7 +240,8 @@ def get_moves(state, color):
     return moves
 
 
-def get_legal_moves(state, color, debug=[]):
+def get_legal_moves(state, color, debug=False):
+    debug = False
     moves = get_moves(state, color)
     legal_moves = []
     for move in moves:
@@ -418,7 +427,10 @@ def check_game_going(state):
 
 def random_move(state, moves):
     return choice(moves)
-    
+
+def  minimax_by_point_value(state, moves, ply=2):
+    values = [minimax(ply, point_value, state=apply_move(state, move), debug=DEBUG) for move in moves]
+    return moves[values.index(max(values))]
 
 def random_promote(pos, col):
     return choice('RNBQ') if col == 'white' else choice('rnbq')
@@ -471,6 +483,7 @@ def autoqueen(pos, col):
 PLAYERS = {
     "human": [human_move_select, autoqueen],
     "random": [random_move, random_promote],
+    "pvmm": [minimax_by_point_value, autoqueen], # point value mini max
 }
 
 #########################
@@ -542,15 +555,39 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
                 if e.type == KEYDOWN:
                     wait = False
 
+# ~~~~ MISC / UTILS ~~~~
+# todo: reorganize later
 
-def run_turn_count_test(ply, turn=CURRENT_STATE["turn"], state=CURRENT_STATE):
-    pretty_print_board(state["board"])
-    state["turn"] = turn
-    if ply == 0: return 1
-    return sum([run_turn_count_test(ply-1, "white" if state["turn"] == "black" else "black", apply_move(state, move)) for move in get_legal_moves(state, state["turn"])])
+def sum_recur_moves(state, func, ply, evaluate_func):
+    turn = "white" if state["turn"] == "black" else "black"
+    return sum([func(ply - 1, evaluate_func, state=apply_move(state, move)) for move in get_legal_moves(state, state["turn"])])
 
+def minimax(ply, evaluate_func, state=CURRENT_STATE, debug=False):
+    if debug:
+        print("search level:" , ply)
+        print(state)
+        pretty_print_board(state["board"])
+
+    if ply == 0: return evaluate_func(state, debug=debug)
+    return sum_recur_moves(state, minimax, ply, evaluate_func)
+
+def point_value(state, debug=False):
+    if debug:
+        print("analyzing point value")
+        pretty_print_board(state["board"])
+    turn = state["turn"]
+    board = state["board"]
+
+    score = 0
     
-    
+    for y, row in enumerate(board):
+        for x, piece in enumerate(row):
+            for key in PIECE_VALUE.keys():
+                if piece and piece in key:
+                    score += PIECE_VALUE[key] * (1 if get_color(piece) == turn else -1)
+
+    if debug: print("score: ", score)
+    return score
 
 if __name__ == "__main__":
     if "-t" in sys.argv:

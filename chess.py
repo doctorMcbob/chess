@@ -133,12 +133,12 @@ BOARD = NEW_BOARD.copy()
 TURN = 'white'
 
 PIECE_VALUE = {
-    "Kk": 0.00,
-    "Pp": 1.00,
-    "Bb": 3.01,
-    "Nn": 3.00,
-    "Rr": 5.01,
-    "Qq": 9.01,
+    "Kk": 0,
+    "Pp": 1,
+    "Bb": 3,
+    "Nn": 3,
+    "Rr": 5,
+    "Qq": 9,
 }
 
 CAN_EN_PASSANT = {
@@ -429,8 +429,10 @@ def random_move(state, moves):
     return choice(moves)
 
 def  minimax_by_point_value(state, moves, ply=2):
-    values = [minimax(ply, point_value, state=apply_move(state, move), debug=DEBUG) for move in moves]
-    return moves[values.index(max(values))]
+    color = state["turn"]
+    values = [minimax(ply, point_value, color, state=apply_move(state, move), debug=DEBUG) for move in moves]
+    best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
+    return choice(best_moves)
 
 def random_promote(pos, col):
     return choice('RNBQ') if col == 'white' else choice('rnbq')
@@ -558,43 +560,42 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
 # ~~~~ MISC / UTILS ~~~~
 # todo: reorganize later
 
-def sum_recur_moves(state, func, ply, evaluate_func):
-    turn = "white" if state["turn"] == "black" else "black"
-    return sum([func(ply - 1, evaluate_func, state=apply_move(state, move)) for move in get_legal_moves(state, state["turn"])])
+def recur_moves(state, func, ply, evaluate_func, color, debug=False):
+    state["turn"] = "white" if state["turn"] == "black" else "black"
+    return [func(ply - 1, evaluate_func, color, state=apply_move(state, move), debug=debug) for move in get_legal_moves(state, state["turn"])]
 
-def minimax(ply, evaluate_func, state=CURRENT_STATE, debug=False):
+def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
     if debug:
         print("search level:" , ply)
         print(state)
         pretty_print_board(state["board"])
 
-    if ply == 0: return evaluate_func(state, debug=debug)
-    return sum_recur_moves(state, minimax, ply, evaluate_func)
+    if ply == 0: return evaluate_func(state, color, debug=debug)
+    moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
+    if ply % 2 == 1:
+        return min(moves, default=-100)
+    else:
+        return max(moves, default=100)
 
-def point_value(state, debug=False):
+def point_value(state, color, debug=False):
     if debug:
         print("analyzing point value")
         pretty_print_board(state["board"])
-    turn = state["turn"]
-    board = state["board"]
 
+    board = state["board"]
     score = 0
     
     for y, row in enumerate(board):
         for x, piece in enumerate(row):
             for key in PIECE_VALUE.keys():
                 if piece and piece in key:
-                    score += PIECE_VALUE[key] * (1 if get_color(piece) == turn else -1)
-
+                    score += PIECE_VALUE[key] * (1 if get_color(piece) == color else -1)
+                   
     if debug: print("score: ", score)
     return score
 
 if __name__ == "__main__":
-    if "-t" in sys.argv:
-        v = int(sys.argv[sys.argv.index("-t") + 1])
-        print(run_turn_count_test(v))
-    else:
-        print(
-            run(CURRENT_STATE, PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
-        )
-                
+    print(
+        run(CURRENT_STATE, PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
+    )
+

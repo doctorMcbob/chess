@@ -109,8 +109,8 @@ SCREEN = pygame.display.set_mode((SW*10, SW*10))
 WHITE = "human" if "-w" not in sys.argv else sys.argv[sys.argv.index("-w") + 1]
 BLACK = "femm" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
 
-WPLY = 2 if "-wply" not in sys.argv else sys.argv[sys.argv.index("-wply") + 1] 
-BPLY = 2 if "-bply" not in sys.argv else sys.argv[sys.argv.index("-bply") + 1]
+WPLY = 2 if "-wply" not in sys.argv else int(sys.argv[sys.argv.index("-wply") + 1] )
+BPLY = 2 if "-bply" not in sys.argv else int(sys.argv[sys.argv.index("-bply") + 1])
 
 DEBUG = "-d" in sys.argv
 PIC = "-pic" in sys.argv

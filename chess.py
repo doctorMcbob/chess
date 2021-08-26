@@ -610,7 +610,6 @@ def save_img(img, frame):
 
 
 def recur_moves(state, func, ply, evaluate_func, color, debug=False):
-    state["turn"] = "white" if state["turn"] == "black" else "black"
     return [func(ply - 1, evaluate_func, color, state=apply_move(state, move), debug=debug) for move in get_legal_moves(state, state["turn"])]
 
 def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
@@ -620,13 +619,17 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
         print(color)
         pretty_print_board(state["board"])
 
-    if ply == 0: return evaluate_func(state, "white" if color == "black" else "black", debug=debug)
+    state["turn"] = "white" if state["turn"] == "black" else "black"
+
+    if ply == 0: return evaluate_func(state, "black" if state["turn"] == "white" else "white", debug=debug)
     moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
 
     checkmate = len(moves) == 0 and in_check(state)
     stalemate = len(moves) == 0 and not checkmate
+
     if debug:
         print(ply, moves)
+        print("min" if state["turn"] != color else "max")
         print(color, state["turn"])
         print("checkmate: ", checkmate)
         print("stalemate: ", stalemate)

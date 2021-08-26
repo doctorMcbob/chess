@@ -145,8 +145,17 @@ NEW_BOARD = [
     ['p']*8,
     ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r']
 ]
-BOARD = NEW_BOARD.copy()
-TURN = 'white'
+
+CHECKMATE_TEST = [
+    ['R', None, None, None, 'K', None, None, 'R'],
+    [None]*8,
+    [None]*8,
+    [None]*8,
+    [None]*8,
+    [None]*8,
+    [None]*8,
+    [None, None, None, None, 'k', None, None, None]
+]
 
 PIECE_VALUE = {
     "Kk": 0,
@@ -167,7 +176,7 @@ CAN_CASTLE = {
     'black': [True, True],
 }
 CURRENT_STATE = {
-    "board": NEW_BOARD.copy(),
+    "board": NEW_BOARD.copy() if "-cmt" not in sys.argv else CHECKMATE_TEST.copy(),
     "turn": "white",
     
     "can castle": {
@@ -417,7 +426,6 @@ def apply_move(state, move):
     return state
 
 
-
 def check_promotions(state, piece_choice_func):
     for x, piece in enumerate(state["board"][7]):
         if piece == "P":
@@ -449,10 +457,16 @@ def  minimax_by_point_value(state, moves, ply=2):
     best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
     return choice(best_moves)
 
-def  minimax_by_full_evaluate(state, moves, ply=2):
+def  minimax_by_full_evaluate(state, moves, ply=2, debug=DEBUG):
     color = state["turn"]
     values = [minimax(ply, full_evaluate, color, state=apply_move(state, move), debug=DEBUG) for move in moves]
+    if debug:
+        pretty_print_board(state["board"])
+        print("deciding move")
+        for i in range(len(moves)):
+            print(moves[i], ":", values[i])
     best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
+    if debug: print("best moves", best_moves)
     return choice(best_moves)
 
 
@@ -606,14 +620,20 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
         print(color)
         pretty_print_board(state["board"])
 
-    if ply == 0: return evaluate_func(state, color, debug=debug)
+    if ply == 0: return evaluate_func(state, "white" if color == "black" else "black", debug=debug)
     moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
 
     checkmate = len(moves) == 0 and in_check(state)
     stalemate = len(moves) == 0 and not checkmate
+    if debug:
+        print(ply, moves)
+        print(color, state["turn"])
+        print("checkmate: ", checkmate)
+        print("stalemate: ", stalemate)
+        # if checkmate or stalemate: input()
 
     if stalemate: return 0
-    if checkmate: return 100 if state["turn"] != color else -100
+    if checkmate: return 100 + ply if state["turn"] != color else -100 - ply
 
     return min(moves) if state["turn"] != color else max(moves)
 

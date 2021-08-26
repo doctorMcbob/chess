@@ -612,14 +612,6 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
     checkmate = len(moves) == 0 and in_check(state)
     stalemate = len(moves) == 0 and not checkmate
 
-    if checkmate:
-        print("CHECKMATE SPOTTED")
-        print(state["turn"], color)
-        pretty_print_board(state["board"])
-    if stalemate:
-        print("STALEMATE SPOTTED")
-        pretty_print_board(state["board"])
-
     if stalemate: return 0
     if checkmate: return 100 if state["turn"] != color else -100
 

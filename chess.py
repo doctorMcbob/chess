@@ -77,11 +77,19 @@ now we get to do the real experiments
 
 Before we can start playing games we need to start analyzing positions
 
+point_value done, just tally the point value difference between players
 
+later expirement with a more verbose position analysis that considers 
+  number of squares in sight and king vulnerability
+
+minimax done, abstract enough to use alternate analysis functions
+
+it takes FOREVER to complete a game with even a search depth of 3. 
+thinking about optomizations now.
 """
 from random import choice
 from copy import deepcopy
-import sys
+import sys, os
 
 import pygame
 from pygame import Surface, Rect
@@ -102,6 +110,11 @@ WHITE = "human" if "-w" not in sys.argv else sys.argv[sys.argv.index("-w") + 1]
 BLACK = "pvmm" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
 
 DEBUG = "-d" in sys.argv
+PIC = "-pic" in sys.argv
+if PIC:
+    import datetime
+    IMG_PATH = "pics/" + str(datetime.datetime.now())+ "/"
+
 
 COLORS = {
     "black square" : (82,52,29),
@@ -515,6 +528,10 @@ def drawn_board(state):
 
 
 def run(state, white_move_choice, white_promotion_func, black_move_choice, black_promotion_func):
+    if PIC:
+        FRAME = 0
+        save_img(drawn_board(state), FRAME)
+
     while check_game_going(state):
         STATE_STACK.append(deepcopy(state))
         SCREEN.fill((150, 150, 150))
@@ -540,6 +557,10 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
             else:
                 check_promotions(state, black_promotion_func)
 
+            if PIC:
+                FRAME += 1
+                save_img(drawn_board(state), FRAME)
+
         else:
             if in_check(state):
                 return '{} wins!'.format('white' if state["turn"] == 'black' else 'black')
@@ -559,6 +580,10 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
 
 # ~~~~ MISC / UTILS ~~~~
 # todo: reorganize later
+def save_img(img, frame):
+    if not os.path.isdir(IMG_PATH): os.mkdir(IMG_PATH)
+    pygame.image.save(img, IMG_PATH + str(frame) + ".png")
+
 
 def recur_moves(state, func, ply, evaluate_func, color, debug=False):
     state["turn"] = "white" if state["turn"] == "black" else "black"
@@ -568,14 +593,22 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
     if debug:
         print("search level:" , ply)
         print(state)
+        print(color)
         pretty_print_board(state["board"])
 
     if ply == 0: return evaluate_func(state, color, debug=debug)
     moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
+    checkmate = len(moves) == 0 and in_check(state)
+    stalemate = len(moves) == 0 and not checkmate
+
+    if stalemate: return 0
+
     if state["turn"] != color:
-        return min(moves, default=-100)
+        if checkmate: return 100
+        return min(moves)
     else:
-        return max(moves, default=100)
+        if checkmate: return -100
+        return max(moves)
 
 def point_value(state, color, debug=False):
     if debug:

@@ -596,19 +596,48 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
         print(color)
         pretty_print_board(state["board"])
 
-    if ply == 0: return evaluate_func(state, color, debug=debug)
-    moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
     checkmate = len(moves) == 0 and in_check(state)
     stalemate = len(moves) == 0 and not checkmate
 
     if stalemate: return 0
+    if checkmate: return 100 if state["turn"] == color else -100
 
-    if state["turn"] != color:
-        if checkmate: return 100
-        return min(moves)
-    else:
-        if checkmate: return -100
-        return max(moves)
+    if ply == 0: return evaluate_func(state, color, debug=debug)
+    moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
+   
+    return min(moves) if state["turn"] != color else return max(moves)
+
+def evaluate(state, color, debug=False):
+    if debug:
+        print("analyzing position")
+        pretty_print_board(state["board"])
+
+    moves = {
+        "black": get_moves(state, "black"),
+        "white": get_moves(state, "white"),
+    }
+
+    points = {
+        "black": 0,
+        "white": 0,
+    }
+
+    for key in moves:
+        for move in moves[key]:
+            for n in move[1]:
+                if n in (3, 4): points[key] += .4
+                if n in (2, 5): points[key] += .3
+                if n in (1, 6): points[key] += .2
+                if n in (0, 7): points[key] += .1
+
+    for y, row in enumerate(state["board"]):
+        for king in "Kk":
+            if king in row:
+                x = row.index(king)
+                points["white" if king.isupper() else "black"] -= len(check_lateral(board, (x, y), "black" if king.isupper() else "white"))
+                points["white" if king.isupper() else "black"] -= len(check_diagonal(board, (x, y), "black" if king.isupper() else "white"))
+
+    return points["white"] - points["black"] if color == "white" else points["black"] - points["white"]
 
 def point_value(state, color, debug=False):
     if debug:

@@ -107,7 +107,10 @@ SW = 96
 SCREEN = pygame.display.set_mode((SW*10, SW*10))
 
 WHITE = "human" if "-w" not in sys.argv else sys.argv[sys.argv.index("-w") + 1]
-BLACK = "pvmm" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
+BLACK = "femm" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
+
+WPLY = 2 if "-wply" not in sys.argv else sys.argv[sys.argv.index("-wply") + 1] 
+BPLY = 2 if "-bply" not in sys.argv else sys.argv[sys.argv.index("-bply") + 1]
 
 DEBUG = "-d" in sys.argv
 PIC = "-pic" in sys.argv
@@ -251,7 +254,7 @@ def get_moves(state, color):
                     if piece in key:
                         moves += GET_MOVES_MAP[key](state, (x, y), color)
     return moves
-
+                
 
 def get_legal_moves(state, color, debug=False):
     debug = False
@@ -271,7 +274,7 @@ def get_legal_moves(state, color, debug=False):
                     if in_check(apply_move(state, ((x1, y1), (x, y2)))):
                         continue
             if debug: print('legal')
-            legal_moves.append(move)
+            legal_moves.append(move)    
         elif debug: print('ilegal')
     return legal_moves
 
@@ -342,7 +345,6 @@ def queen_moves(state, pos, color):
 
 
 def king_moves(state, pos, color):
-    # TODO: CHECK FOR CHECKS ON CASTLING
     x, y = pos
     moves = []
     for dx, dy in [(1, -1), (1, 0), (1, 1),
@@ -438,20 +440,27 @@ def check_game_going(state):
 #                       #
 #########################
 
-def random_move(state, moves):
+def random_move(state, moves, ply=False):
     return choice(moves)
 
-def  minimax_by_point_value(state, moves, ply=3):
+def  minimax_by_point_value(state, moves, ply=2):
     color = state["turn"]
     values = [minimax(ply, point_value, color, state=apply_move(state, move), debug=DEBUG) for move in moves]
     best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
     return choice(best_moves)
 
+def  minimax_by_full_evaluate(state, moves, ply=2):
+    color = state["turn"]
+    values = [minimax(ply, full_evaluate, color, state=apply_move(state, move), debug=DEBUG) for move in moves]
+    best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
+    return choice(best_moves)
+
+
 def random_promote(pos, col):
     return choice('RNBQ') if col == 'white' else choice('rnbq')
 
 
-def human_move_select(state, moves):
+def human_move_select(state, moves, ply=False):
     piece_to_move = None
     moves_for_piece = []
     while True:
@@ -499,6 +508,7 @@ PLAYERS = {
     "human": [human_move_select, autoqueen],
     "random": [random_move, random_promote],
     "pvmm": [minimax_by_point_value, autoqueen], # point value mini max
+    "femm": [minimax_by_full_evaluate, autoqueen], # full evaluate mini max
 }
 
 #########################
@@ -543,7 +553,7 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
 
         if moves := get_legal_moves(state, state["turn"], debug=DEBUG):
             state["can en passant"][state["turn"]] = [False] * 8
-            move = white_move_choice(state, moves) if state["turn"] == 'white' else black_move_choice(state, moves)
+            move = white_move_choice(state, moves, ply=WPLY) if state["turn"] == 'white' else black_move_choice(state, moves, ply=BPLY)
 
             pos1, pos2 = move
             if pos1[1] == 1 and pos2[1] == 3 and state["board"][pos1[1]][pos1[0]] == "P":
@@ -596,20 +606,23 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
         print(color)
         pretty_print_board(state["board"])
 
+    if ply == 0: return evaluate_func(state, color, debug=debug)
+    moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
+
     checkmate = len(moves) == 0 and in_check(state)
     stalemate = len(moves) == 0 and not checkmate
 
     if stalemate: return 0
     if checkmate: return 100 if state["turn"] == color else -100
 
-    if ply == 0: return evaluate_func(state, color, debug=debug)
-    moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
-   
-    return min(moves) if state["turn"] != color else return max(moves)
+    return min(moves) if state["turn"] != color else max(moves)
 
-def evaluate(state, color, debug=False):
+def full_evaluate(state, color, debug=False):
+    return sum([func(state, color, debug=debug) for func in [point_value, line_of_sight_points, king_in_sight_points]])
+
+def line_of_sight_points(state, color, debug=False):
     if debug:
-        print("analyzing position")
+        print("analyzing sights")
         pretty_print_board(state["board"])
 
     moves = {
@@ -630,12 +643,24 @@ def evaluate(state, color, debug=False):
                 if n in (1, 6): points[key] += .2
                 if n in (0, 7): points[key] += .1
 
+    return points["white"] - points["black"] if color == "white" else points["black"] - points["white"]
+
+def king_in_sight_points(state, color, debug=False):
+    if debug:
+        print("analyzing king safety")
+        pretty_print_board(state["board"])
+
+    points = {
+        "black": 0,
+        "white": 0,
+    }
+
     for y, row in enumerate(state["board"]):
         for king in "Kk":
             if king in row:
                 x = row.index(king)
-                points["white" if king.isupper() else "black"] -= len(check_lateral(board, (x, y), "black" if king.isupper() else "white"))
-                points["white" if king.isupper() else "black"] -= len(check_diagonal(board, (x, y), "black" if king.isupper() else "white"))
+                points["white" if king.isupper() else "black"] -= len(check_lateral(state["board"], (x, y), "black" if king.isupper() else "white"))
+                points["white" if king.isupper() else "black"] -= len(check_diagonal(state["board"], (x, y), "black" if king.isupper() else "white"))
 
     return points["white"] - points["black"] if color == "white" else points["black"] - points["white"]
 

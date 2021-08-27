@@ -660,6 +660,7 @@ def line_of_sight_points(state, color, debug=False):
 
     for key in moves:
         for move in moves[key]:
+            if state["board"][move[0][1]][move[0][0]] in "Qq": continue
             for n in move[1]:
                 if n in (3, 4): points[key] += .4
                 if n in (2, 5): points[key] += .3
@@ -672,10 +673,10 @@ def king_in_sight_points(state, color, debug=False):
     if debug:
         print("analyzing king safety")
         pretty_print_board(state["board"])
-
+ 
     points = {
-        "black": 0,
-        "white": 0,
+        "black": sum(state["can castle"]["black"]) * 1.5,
+        "white": sum(state["can castle"]["white"]) * 1.5,
     }
 
     for y, row in enumerate(state["board"]):
@@ -685,7 +686,7 @@ def king_in_sight_points(state, color, debug=False):
                 points["white" if king.isupper() else "black"] -= len(check_lateral(state["board"], (x, y), "black" if king.isupper() else "white"))
                 points["white" if king.isupper() else "black"] -= len(check_diagonal(state["board"], (x, y), "black" if king.isupper() else "white"))
 
-    return points["white"] - points["black"] if color == "white" else points["black"] - points["white"]
+    return (points["white"] - points["black"] if color == "white" else points["black"] - points["white"]) * 0.1
 
 def point_value(state, color, debug=False):
     if debug:

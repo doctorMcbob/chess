@@ -190,6 +190,10 @@ CURRENT_STATE = {
 }
 
 STATE_STACK = []
+CACHED_SCORES = {
+    "black": {},
+    "white": {},
+}
 
 #########################
 #                       #
@@ -458,8 +462,9 @@ def  minimax_by_point_value(state, moves, ply=2):
     return choice(best_moves)
 
 def  minimax_by_full_evaluate(state, moves, ply=2, debug=DEBUG):
+    cache = deepcopy(CACHED_SCORES)
     color = state["turn"]
-    values = [minimax(ply, full_evaluate, color, state=apply_move(state, move), debug=DEBUG) for move in moves]
+    values = [minimax(ply, full_evaluate, color, cache, state=apply_move(state, move), debug=DEBUG) for move in moves]
     if debug:
         pretty_print_board(state["board"])
         print("deciding move")
@@ -550,20 +555,24 @@ def drawn_board(state):
 
     return surf
 
+def draw(state):
+    SCREEN.fill((150, 150, 150))
+    SCREEN.blit(drawn_board(state), (SW, SW))
+    for x in range(1, 9):
+        tk.draw_token(SCREEN, "{}".format("_ABCDEFGH"[x]), (x*SW, SW*9), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
+    for y in range(1, 9):
+        tk.draw_token(SCREEN, "{}".format(y), (0, SW*(9-y)), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
+    pygame.display.update()
 
+        
 def run(state, white_move_choice, white_promotion_func, black_move_choice, black_promotion_func):
     if PIC:
         FRAME = 0
         save_img(drawn_board(state), FRAME)
 
+    draw(state)
     while check_game_going(state):
         STATE_STACK.append(deepcopy(state))
-        SCREEN.fill((150, 150, 150))
-        SCREEN.blit(drawn_board(state), (SW, SW))
-        for x in range(1, 9):
-            tk.draw_token(SCREEN, "{}".format("_ABCDEFGH"[x]), (x*SW, SW*9), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
-        for y in range(1, 9):
-            tk.draw_token(SCREEN, "{}".format(y), (0, SW*(9-y)), col1=(150, 150, 150), col2=(0, 0, 0), PW=(SW//16))
 
         if moves := get_legal_moves(state, state["turn"], debug=DEBUG):
             state["can en passant"][state["turn"]] = [False] * 8
@@ -585,14 +594,15 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
                 FRAME += 1
                 save_img(drawn_board(state), FRAME)
 
+            draw(state)
         else:
             if in_check(state):
                 return '{} wins!'.format('white' if state["turn"] == 'black' else 'black')
             else:
                 return 'stalemate'
+
         state["turn"] = 'white' if state["turn"] == 'black' else 'black'
         
-        pygame.display.update()
         wait = True
         while wait:
             wait = False
@@ -608,24 +618,58 @@ def save_img(img, frame):
     if not os.path.isdir(IMG_PATH): os.mkdir(IMG_PATH)
     pygame.image.save(img, IMG_PATH + str(frame) + ".png")
 
+def truncate_board(board):
+    return ",".join(["".join([str(peice) for peice in row]) for row in board])    
 
-def recur_moves(state, func, ply, evaluate_func, color, debug=False):
-    return [func(ply - 1, evaluate_func, color, state=apply_move(state, move), debug=debug) for move in get_legal_moves(state, state["turn"])]
+def check_cache(state, ply, cache, debug=True):
+    trunc = truncate_board(state["board"])
+    if trunc in cache[state["turn"]]:
+        cached_ply, score = cache[state["turn"]][trunc]
+        if ply <= cached_ply:
+            if debug:
+                print("using cache")
+                print("ply: ", ply, " cached: ", cached_ply)
+                print(sum([len(cache[key]) for key in cache]))
+            return score
+    return None
 
-def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
+def cache_score(state, ply, score, cache):
+    trunc = truncate_board(state["board"])
+    cache[state["turn"]][trunc] = (ply, score)
+
+def recur_moves(state, func, ply, evaluate_func, color, cache, debug=False):
+    return [func(ply - 1, evaluate_func, color, cache, state=apply_move(state, move), debug=debug) for move in get_legal_moves(state, state["turn"])]
+
+def minimax(ply, evaluate_func, color, cache, state=CURRENT_STATE, debug=False):
     if debug:
         print("search level:" , ply)
         print(state)
         print(color)
+        print(sum([len(cache[key]) for key in cache]))
         pretty_print_board(state["board"])
 
     state["turn"] = "white" if state["turn"] == "black" else "black"
 
-    if ply == 0: return evaluate_func(state, "black" if state["turn"] == "white" else "white", debug=debug)
-    moves = recur_moves(state, minimax, ply, evaluate_func, color, debug=debug)
+    cached = check_cache(state, ply, cache)
+    if cached is not None: return cached
+    
+    if ply == 0:
+        return evaluate_func(state, "black" if state["turn"] == "white" else "white", debug=debug) 
+
+    moves = recur_moves(state, minimax, ply, evaluate_func, color, cache, debug=debug)
 
     checkmate = len(moves) == 0 and in_check(state)
     stalemate = len(moves) == 0 and not checkmate
+
+    if stalemate:
+        score = 0
+    elif checkmate:
+        score = 100 + ply if state["turn"] != color else -100 - ply
+    else:
+        score = min(moves) if state["turn"] != color else max(moves)
+
+    if ply > 2:
+        cache_score(state, ply, score, cache)
 
     if debug:
         print(ply, moves)
@@ -633,12 +677,9 @@ def minimax(ply, evaluate_func, color, state=CURRENT_STATE, debug=False):
         print(color, state["turn"])
         print("checkmate: ", checkmate)
         print("stalemate: ", stalemate)
-        # if checkmate or stalemate: input()
+        print("score: ", score)
 
-    if stalemate: return 0
-    if checkmate: return 100 + ply if state["turn"] != color else -100 - ply
-
-    return min(moves) if state["turn"] != color else max(moves)
+    return score
 
 def full_evaluate(state, color, debug=False):
     return sum([func(state, color, debug=debug) for func in [point_value, line_of_sight_points, king_in_sight_points]])

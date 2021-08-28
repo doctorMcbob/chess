@@ -111,6 +111,7 @@ BLACK = "femm" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
 
 WPLY = 2 if "-wply" not in sys.argv else int(sys.argv[sys.argv.index("-wply") + 1] )
 BPLY = 2 if "-bply" not in sys.argv else int(sys.argv[sys.argv.index("-bply") + 1])
+CACHE_PLY = False if "-cache" not in sys.argv else int(sys.argv[sys.argv.index("-cache") + 1])
 
 DEBUG = "-d" in sys.argv
 PIC = "-pic" in sys.argv
@@ -166,15 +167,6 @@ PIECE_VALUE = {
     "Qq": 9,
 }
 
-CAN_EN_PASSANT = {
-    'white': [False] * 8,
-    'black': [False] * 8,
-}
-
-CAN_CASTLE = {
-    'white': [True, True],
-    'black': [True, True],
-}
 CURRENT_STATE = {
     "board": NEW_BOARD.copy() if "-cmt" not in sys.argv else CHECKMATE_TEST.copy(),
     "turn": "white",
@@ -189,7 +181,6 @@ CURRENT_STATE = {
     }
 }
 
-STATE_STACK = []
 CACHED_SCORES = {
     "black": {},
     "white": {},
@@ -257,25 +248,28 @@ def check_diagonal(board, pos, color):
     return moves
 
 
-def get_moves(state, color):
+def get_moves(state, color, check_test=False):
     moves = []
     for y, row in enumerate(state["board"]):
         for x, piece in enumerate(row):
-            if piece is None: continue
+            if piece is None or (check_test and piece in "Kk"): continue
             if get_color(piece) == color:
-                for key in GET_MOVES_MAP:
+                keys = list(GET_MOVES_MAP.keys())
+                keys.sort()
+                for key in keys:
                     if piece in key:
                         moves += GET_MOVES_MAP[key](state, (x, y), color)
     return moves
                 
 
-def get_legal_moves(state, color, debug=False):
+def get_legal_moves(state, color, debug=True):
     debug = False
     moves = get_moves(state, color)
     legal_moves = []
+    captures = []
     for move in moves:
         if debug: pretty_print_board(apply_move(state, move)["board"])
-        if not in_check(apply_move(state, move)):
+        if not in_check(apply_move(state, move), color):
             # check for castle has to live here instead of in king_moves
             x1, y1 = move[0]
             x2, y2 = move[1]
@@ -284,19 +278,21 @@ def get_legal_moves(state, color, debug=False):
                 # and the distance we are moving is two
                 if abs(x1 - x2) == 2:
                     x = x1 - (x1 - x2) // 2 # not hacky :fingers_crossed:
-                    if in_check(apply_move(state, ((x1, y1), (x, y2)))):
+                    if in_check(apply_move(state, ((x1, y1), (x, y2))), color):
                         continue
             if debug: print('legal')
+            if state["board"][y2][x2] is not None:
+                captures.append(move)
+                continue
             legal_moves.append(move)    
         elif debug: print('ilegal')
-    return legal_moves
+    return captures + legal_moves
 
-
-def in_check(state):
-    col = "white" if state["turn"] == "black" else "black"
-    for move in get_moves(state, col):
+def in_check(state, color):
+    col = "white" if color == "black" else "black"
+    for move in get_moves(state, col, check_test=True):
         x, y = move[1]
-        if state["board"][y][x] == ('K' if state["turn"] == 'white' else 'k'):
+        if state["board"][y][x] == ('K' if color == 'white' else 'k'):
             return True
     return False
 
@@ -367,20 +363,21 @@ def king_moves(state, pos, color):
             moves.append((pos, (x+dx, y+dy)))
 
     # castle
-    castle_y = 0 if color == 'white' else 7
-    if state["can castle"][color][0] and not any(state["board"][castle_y][1:4]):
-        moves.append((pos, (2, castle_y)))
-    if state["can castle"][color][1] and not any(state["board"][castle_y][5:7]):
-        moves.append((pos, (6, castle_y)))
+    if not in_check(state, color):
+        castle_y = 0 if color == 'white' else 7
+        if state["can castle"][color][0] and not any(state["board"][castle_y][1:4]):
+            moves.append((pos, (2, castle_y)))
+        if state["can castle"][color][1] and not any(state["board"][castle_y][5:7]):
+            moves.append((pos, (6, castle_y)))
     return moves
 
 GET_MOVES_MAP = {
-    "Rr": rook_moves,
-    "Nn": knight_moves,
-    "Bb": bishop_moves,
-    "Qq": queen_moves,
-    "Kk": king_moves,
-    "Pp": pawn_moves,
+    "1Rr": rook_moves,
+    "2Nn": knight_moves,
+    "3Bb": bishop_moves,
+    "0Qq": queen_moves,
+    "4Kk": king_moves,
+    "5Pp": pawn_moves,
 }
 
 #########################
@@ -427,6 +424,8 @@ def apply_move(state, move):
     if state["can castle"]['black'][1] and state["board"][7][7] != "r":
         state["can castle"]['black'][1] = False
 
+    state["turn"] = 'white' if state["turn"] == 'black' else 'black'
+
     return state
 
 
@@ -452,34 +451,27 @@ def check_game_going(state):
 #                       #
 #########################
 
-def random_move(state, moves, ply=False):
-    return choice(moves)
+# progromatic move choice
+def random_move(state, color, ply=False):
+    return choice(get_legal_moves(state, color))
+def  minimax_by_point_value(state, color, ply=2, debug=False):
+    score, move = minimax(ply, point_value, state, color, debug=debug)
+    if debug: print("chose", score, move)
+    return move
+def  minimax_by_full_evaluate(state, color, ply=2, debug=DEBUG):
+    score, move = minimax(ply, full_evaluate, state, color, debug=debug)
+    if debug: print("chose", score, move)
+    return move
 
-def  minimax_by_point_value(state, moves, ply=2):
-    color = state["turn"]
-    values = [minimax(ply, point_value, color, state=apply_move(state, move), debug=DEBUG) for move in moves]
-    best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
-    return choice(best_moves)
-
-def  minimax_by_full_evaluate(state, moves, ply=2, debug=DEBUG):
-    cache = deepcopy(CACHED_SCORES)
-    color = state["turn"]
-    values = [minimax(ply, full_evaluate, color, cache, state=apply_move(state, move), debug=DEBUG) for move in moves]
-    if debug:
-        pretty_print_board(state["board"])
-        print("deciding move")
-        for i in range(len(moves)):
-            print(moves[i], ":", values[i])
-    best_moves = list(filter(lambda move: values[moves.index(move)] == max(values), moves))
-    if debug: print("best moves", best_moves)
-    return choice(best_moves)
-
-
+# progromatic promotion choice
 def random_promote(pos, col):
     return choice('RNBQ') if col == 'white' else choice('rnbq')
+def autoqueen(pos, col):
+    return 'Q' if col == 'white' else 'q'
 
-
-def human_move_select(state, moves, ply=False):
+# human move choice
+def human_move_select(state, color, ply=False):
+    moves = get_legal_moves(state, color)
     piece_to_move = None
     moves_for_piece = []
     while True:
@@ -517,10 +509,8 @@ def human_move_select(state, moves, ply=False):
                         for move in moves_for_piece:
                             if move[1] == pos:
                                 return move
-
-
-def autoqueen(pos, col):
-    return 'Q' if col == 'white' else 'q'
+# human promotion choice
+# to do...
 
 
 PLAYERS = {
@@ -572,11 +562,11 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
 
     draw(state)
     while check_game_going(state):
-        STATE_STACK.append(deepcopy(state))
-
+        turn = state["turn"]
         if moves := get_legal_moves(state, state["turn"], debug=DEBUG):
             state["can en passant"][state["turn"]] = [False] * 8
-            move = white_move_choice(state, moves, ply=WPLY) if state["turn"] == 'white' else black_move_choice(state, moves, ply=BPLY)
+            move_choose = white_move_choice if state["turn"] == "white" else black_move_choice
+            move = move_choose(state, state["turn"], ply=WPLY if state["turn"] == "white" else BPLY)
 
             pos1, pos2 = move
             if pos1[1] == 1 and pos2[1] == 3 and state["board"][pos1[1]][pos1[0]] == "P":
@@ -585,7 +575,7 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
                 state["can en passant"]['white'][pos1[0]] = True
             
             state = apply_move(state, move)
-            if state["turn"] == 'white':
+            if turn == 'white':
                 check_promotions(state, white_promotion_func)
             else:
                 check_promotions(state, black_promotion_func)
@@ -596,13 +586,11 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
 
             draw(state)
         else:
-            if in_check(state):
+            if in_check(state, state["turn"]):
                 return '{} wins!'.format('white' if state["turn"] == 'black' else 'black')
             else:
                 return 'stalemate'
 
-        state["turn"] = 'white' if state["turn"] == 'black' else 'black'
-        
         wait = True
         while wait:
             wait = False
@@ -622,6 +610,7 @@ def truncate_board(board):
     return ",".join(["".join([str(peice) for peice in row]) for row in board])    
 
 def check_cache(state, ply, cache, debug=True):
+    if CACHE_PLY == False: return
     trunc = truncate_board(state["board"])
     if trunc in cache[state["turn"]]:
         cached_ply, score = cache[state["turn"]][trunc]
@@ -634,53 +623,55 @@ def check_cache(state, ply, cache, debug=True):
     return None
 
 def cache_score(state, ply, score, cache):
+    if ply < CACHE_PLY: return
     trunc = truncate_board(state["board"])
     cache[state["turn"]][trunc] = (ply, score)
 
-def recur_moves(state, func, ply, evaluate_func, color, cache, debug=False):
-    return [func(ply - 1, evaluate_func, color, cache, state=apply_move(state, move), debug=debug) for move in get_legal_moves(state, state["turn"])]
-
-def minimax(ply, evaluate_func, color, cache, state=CURRENT_STATE, debug=False):
-    if debug:
-        print("search level:" , ply)
-        print(state)
-        print(color)
-        print(sum([len(cache[key]) for key in cache]))
-        pretty_print_board(state["board"])
-
-    state["turn"] = "white" if state["turn"] == "black" else "black"
-
-    cached = check_cache(state, ply, cache)
-    if cached is not None: return cached
-    
+def minimax(ply, evaluate_func, state, color, alpha=-1000, beta=1000, debug=False):
+    moves = get_legal_moves(state, state["turn"])
     if ply == 0:
-        return evaluate_func(state, "black" if state["turn"] == "white" else "white", debug=debug) 
-
-    moves = recur_moves(state, minimax, ply, evaluate_func, color, cache, debug=debug)
-
-    checkmate = len(moves) == 0 and in_check(state)
-    stalemate = len(moves) == 0 and not checkmate
-
-    if stalemate:
-        score = 0
-    elif checkmate:
-        score = 100 + ply if state["turn"] != color else -100 - ply
+        return evaluate_func(state, color), None
+    if len(moves) == 0:
+        if not in_check(state, color):
+            return 0, None
+        if state["turn"] == color:
+            return -100, None
+        else:
+            return 100, None
+    
+    if state["turn"] == color:
+        value_max = -1000
+        max_move = None
+        for move in moves:
+            value, _ = minimax(ply - 1, evaluate_func, apply_move(state, move), color, alpha, beta, debug=debug)
+            if debug:
+                print(ply, state, pretty_print_board(state["board"]))
+                print(alpha, beta, value, value_max)
+            if value >= value_max:
+                value_max = value
+                max_move = move
+            if value > alpha:
+                alpha = value
+            if beta <= alpha:
+                break
+        return value_max, max_move
     else:
-        score = min(moves) if state["turn"] != color else max(moves)
-
-    if ply > 2:
-        cache_score(state, ply, score, cache)
-
-    if debug:
-        print(ply, moves)
-        print("min" if state["turn"] != color else "max")
-        print(color, state["turn"])
-        print("checkmate: ", checkmate)
-        print("stalemate: ", stalemate)
-        print("score: ", score)
-
-    return score
-
+        value_min = 1000
+        min_move = None
+        for move in moves:
+            value, _ = minimax(ply - 1, evaluate_func, apply_move(state, move), color, alpha, beta, debug=debug)
+            if debug:
+                print(ply, state, pretty_print_board(state["board"]))
+                print(alpha, beta, value, value_min)
+            if value <= value_min:
+                value_min = value
+                min_move = move
+            if value < beta:
+                beta = value
+            if beta <= alpha:
+                break
+        return value_min, min_move
+            
 def full_evaluate(state, color, debug=False):
     return sum([func(state, color, debug=debug) for func in [point_value, line_of_sight_points, king_in_sight_points]])
 

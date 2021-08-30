@@ -178,7 +178,8 @@ CURRENT_STATE = {
     "can en passant": {
         "white": [False] * 8,
         "black": [False] * 8,
-    }
+    },
+    "stack": [],
 }
 
 CACHED_SCORES = {
@@ -248,11 +249,11 @@ def check_diagonal(board, pos, color):
     return moves
 
 
-def get_moves(state, color, check_test=False):
+def get_moves(state, color, no_check=False):
     moves = []
     for y, row in enumerate(state["board"]):
         for x, piece in enumerate(row):
-            if piece is None or (check_test and piece in "Kk"): continue
+            if piece is None or (no_check and piece in "Kk"): continue
             if get_color(piece) == color:
                 keys = list(GET_MOVES_MAP.keys())
                 keys.sort()
@@ -288,9 +289,9 @@ def get_legal_moves(state, color, debug=True):
         elif debug: print('ilegal')
     return captures + legal_moves
 
-def in_check(state, color):
+def in_check(state, color, no_check=False):
     col = "white" if color == "black" else "black"
-    for move in get_moves(state, col, check_test=True):
+    for move in get_moves(state, col, no_check):
         x, y = move[1]
         if state["board"][y][x] == ('K' if color == 'white' else 'k'):
             return True
@@ -363,7 +364,7 @@ def king_moves(state, pos, color):
             moves.append((pos, (x+dx, y+dy)))
 
     # castle
-    if not in_check(state, color):
+    if not in_check(state, color, no_check=True):
         castle_y = 0 if color == 'white' else 7
         if state["can castle"][color][0] and not any(state["board"][castle_y][1:4]):
             moves.append((pos, (2, castle_y)))
@@ -424,8 +425,9 @@ def apply_move(state, move):
     if state["can castle"]['black'][1] and state["board"][7][7] != "r":
         state["can castle"]['black'][1] = False
 
+    check_promotions(state, autoqueen)
     state["turn"] = 'white' if state["turn"] == 'black' else 'black'
-
+    state["stack"].append(move)
     return state
 
 
@@ -437,6 +439,21 @@ def check_promotions(state, piece_choice_func):
         if piece == "p":
             state["board"][0][x] = piece_choice_func((0, x), 'black')
 
+
+def check_perpetual(state):
+    state = deepcopy(state)
+    if len(state["stack"]) < 8:
+        return False
+    move1 = state["stack"].pop()
+    move2 = state["stack"].pop()
+    move3 = state["stack"].pop()
+    move4 = state["stack"].pop()
+    if (state["stack"].pop() != move1
+        or state["stack"].pop() != move2
+        or state["stack"].pop() != move3
+        or state["stack"].pop() != move4):
+        return False
+    return True
 
 def check_game_going(state):
     white, black = False, False
@@ -454,15 +471,27 @@ def check_game_going(state):
 # progromatic move choice
 def random_move(state, color, ply=False):
     return choice(get_legal_moves(state, color))
-def  minimax_by_point_value(state, color, ply=2, debug=False):
+def minimax_by_point_value(state, color, ply=3, debug=DEBUG):
     score, move = minimax(ply, point_value, state, color, debug=debug)
     if debug: print("chose", score, move)
     return move
-def  minimax_by_full_evaluate(state, color, ply=2, debug=DEBUG):
+def minimax_by_full_evaluate(state, color, ply=3, debug=DEBUG):
     score, move = minimax(ply, full_evaluate, state, color, debug=debug)
     if debug: print("chose", score, move)
     return move
-
+def minimax_full_evaluate_deepen_simple(state, color, ply=3, debug=DEBUG):
+    """if there are only a few opponent peices left deepen search"""
+    pieces = 0
+    limit = 8
+    for y, row in enumerate(state["board"]):
+        for x, piece in enumerate(row):
+            if piece:
+                pieces += 1
+                if pieces > limit: break
+    if pieces < limit:
+        ply += min([2, limit - pieces])
+    return minimax_by_full_evaluate(state, color, ply=ply, debug=debug)
+    
 # progromatic promotion choice
 def random_promote(pos, col):
     return choice('RNBQ') if col == 'white' else choice('rnbq')
@@ -518,6 +547,7 @@ PLAYERS = {
     "random": [random_move, random_promote],
     "pvmm": [minimax_by_point_value, autoqueen], # point value mini max
     "femm": [minimax_by_full_evaluate, autoqueen], # full evaluate mini max
+    "femmds": [minimax_full_evaluate_deepen_simple, autoqueen],
 }
 
 #########################
@@ -561,7 +591,7 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
         save_img(drawn_board(state), FRAME)
 
     draw(state)
-    while check_game_going(state):
+    while check_game_going(state) and not check_perpetual(state):
         turn = state["turn"]
         if moves := get_legal_moves(state, state["turn"], debug=DEBUG):
             state["can en passant"][state["turn"]] = [False] * 8
@@ -575,10 +605,6 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
                 state["can en passant"]['white'][pos1[0]] = True
             
             state = apply_move(state, move)
-            if turn == 'white':
-                check_promotions(state, white_promotion_func)
-            else:
-                check_promotions(state, black_promotion_func)
 
             if PIC:
                 FRAME += 1
@@ -589,7 +615,7 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
             if in_check(state, state["turn"]):
                 return '{} wins!'.format('white' if state["turn"] == 'black' else 'black')
             else:
-                return 'stalemate'
+                return 'Draw'
 
         wait = True
         while wait:
@@ -629,15 +655,19 @@ def cache_score(state, ply, score, cache):
 
 def minimax(ply, evaluate_func, state, color, alpha=-1000, beta=1000, debug=False):
     moves = get_legal_moves(state, state["turn"])
+
+    if check_perpetual(state): return 0, None
+
+    if len(moves) == 0:
+        if in_check(state, state["turn"]):
+            if state["turn"] == color:
+                return -100 + ply, None
+            else:
+                return 100 + ply, None
+        return 0, None
+
     if ply == 0:
         return evaluate_func(state, color), None
-    if len(moves) == 0:
-        if not in_check(state, color):
-            return 0, None
-        if state["turn"] == color:
-            return -100, None
-        else:
-            return 100, None
     
     if state["turn"] == color:
         value_max = -1000
@@ -694,8 +724,8 @@ def line_of_sight_points(state, color, debug=False):
         for move in moves[key]:
             if state["board"][move[0][1]][move[0][0]] in "Qq": continue
             for n in move[1]:
-                if n in (3, 4): points[key] += .4
-                if n in (2, 5): points[key] += .3
+                if n in (3, 4): points[key] += .3
+                if n in (2, 5): points[key] += .2
                 if n in (1, 6): points[key] += .2
                 if n in (0, 7): points[key] += .1
 
@@ -718,7 +748,7 @@ def king_in_sight_points(state, color, debug=False):
                 points["white" if king.isupper() else "black"] -= len(check_lateral(state["board"], (x, y), "black" if king.isupper() else "white"))
                 points["white" if king.isupper() else "black"] -= len(check_diagonal(state["board"], (x, y), "black" if king.isupper() else "white"))
 
-    return (points["white"] - points["black"] if color == "white" else points["black"] - points["white"]) * 0.1
+    return points[color] * 0.01
 
 def point_value(state, color, debug=False):
     if debug:
@@ -731,11 +761,14 @@ def point_value(state, color, debug=False):
     for y, row in enumerate(board):
         for x, piece in enumerate(row):
             for key in PIECE_VALUE.keys():
+                if piece and piece in "Pp":
+                    score += 0.01 * y if color == "white" else 0.01 * (7 - y)
+                    
                 if piece and piece in key:
                     score += PIECE_VALUE[key] * (1 if get_color(piece) == color else -1)
                    
     if debug: print("score: ", score)
-    return score
+    return score * 2
 
 if __name__ == "__main__":
     print(

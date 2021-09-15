@@ -112,6 +112,9 @@ BLACK = "femm" if "-b" not in sys.argv else sys.argv[sys.argv.index("-b") + 1]
 WPLY = 2 if "-wply" not in sys.argv else int(sys.argv[sys.argv.index("-wply") + 1] )
 BPLY = 2 if "-bply" not in sys.argv else int(sys.argv[sys.argv.index("-bply") + 1])
 CACHE_PLY = False if "-cache" not in sys.argv else int(sys.argv[sys.argv.index("-cache") + 1])
+CACHE = {
+    "black": {}, "white": {}
+}
 
 DEBUG = "-d" in sys.argv
 PIC = "-pic" in sys.argv
@@ -179,6 +182,8 @@ CURRENT_STATE = {
         "white": [False] * 8,
         "black": [False] * 8,
     },
+    "moves": {"white": [], "black":[]},
+    "legal moves":  {"white": [], "black":[]},
     "stack": [],
 }
 
@@ -249,11 +254,11 @@ def check_diagonal(board, pos, color):
     return moves
 
 
-def get_moves(state, color, no_check=False):
+def get_moves(state, color, debug=DEBUG):
     moves = []
     for y, row in enumerate(state["board"]):
         for x, piece in enumerate(row):
-            if piece is None or (no_check and piece in "Kk"): continue
+            if piece is None: continue
             if get_color(piece) == color:
                 keys = list(GET_MOVES_MAP.keys())
                 keys.sort()
@@ -263,9 +268,8 @@ def get_moves(state, color, no_check=False):
     return moves
                 
 
-def get_legal_moves(state, color, debug=True):
-    debug = False
-    moves = get_moves(state, color)
+def get_legal_moves(state, color, split=False, debug=DEBUG):
+    moves = state["moves"][color]
     legal_moves = []
     captures = []
     for move in moves:
@@ -285,13 +289,13 @@ def get_legal_moves(state, color, debug=True):
             if state["board"][y2][x2] is not None:
                 captures.append(move)
                 continue
-            legal_moves.append(move)    
+            legal_moves.append(move)
         elif debug: print('ilegal')
-    return captures + legal_moves
+    state["legal moves"][color] = (captures, legal_moves)
 
-def in_check(state, color, no_check=False):
+def in_check(state, color):
     col = "white" if color == "black" else "black"
-    for move in get_moves(state, col, no_check):
+    for move in state["moves"][col]:
         x, y = move[1]
         if state["board"][y][x] == ('K' if color == 'white' else 'k'):
             return True
@@ -364,7 +368,7 @@ def king_moves(state, pos, color):
             moves.append((pos, (x+dx, y+dy)))
 
     # castle
-    if not in_check(state, color, no_check=True):
+    if not in_check(state, color):
         castle_y = 0 if color == 'white' else 7
         if state["can castle"][color][0] and not any(state["board"][castle_y][1:4]):
             moves.append((pos, (2, castle_y)))
@@ -428,6 +432,10 @@ def apply_move(state, move):
     check_promotions(state, autoqueen)
     state["turn"] = 'white' if state["turn"] == 'black' else 'black'
     state["stack"].append(move)
+
+    state["moves"]["white"] = get_moves(state, "white", debug=DEBUG)
+    state["moves"]["black"] = get_moves(state, "black", debug=DEBUG)
+    
     return state
 
 
@@ -470,13 +478,18 @@ def check_game_going(state):
 
 # progromatic move choice
 def random_move(state, color, ply=False):
-    return choice(get_legal_moves(state, color))
+    return choice(state["legal moves"][color])
 def minimax_by_point_value(state, color, ply=3, debug=DEBUG):
     score, move = minimax(ply, point_value, state, color, debug=debug)
     if debug: print("chose", score, move)
     return move
 def minimax_by_full_evaluate(state, color, ply=3, debug=DEBUG):
     score, move = minimax(ply, full_evaluate, state, color, debug=debug)
+    if debug: print("chose", score, move)
+    return move
+def minimax_full_evaluate_with_cache(state, color, ply=3, debug=DEBUG):
+    cache = {}
+    score, move = minimax(ply, full_evaluate, state, color, cache=cache, debug=debug)
     if debug: print("chose", score, move)
     return move
 def minimax_full_evaluate_deepen_simple(state, color, ply=3, debug=DEBUG):
@@ -500,7 +513,8 @@ def autoqueen(pos, col):
 
 # human move choice
 def human_move_select(state, color, ply=False):
-    moves = get_legal_moves(state, color)
+    captures, other = state["legal moves"][color]
+    moves = captures + other
     piece_to_move = None
     moves_for_piece = []
     while True:
@@ -586,6 +600,12 @@ def draw(state):
 
         
 def run(state, white_move_choice, white_promotion_func, black_move_choice, black_promotion_func):
+
+    state["moves"]["white"] = get_moves(state, "white", debug=DEBUG)
+    state["moves"]["black"] = get_moves(state, "black", debug=DEBUG)
+    get_legal_moves(state, "white", debug=DEBUG)
+    get_legal_moves(state, "black", debug=DEBUG)
+
     if PIC:
         FRAME = 0
         save_img(drawn_board(state), FRAME)
@@ -593,7 +613,8 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
     draw(state)
     while check_game_going(state) and not check_perpetual(state):
         turn = state["turn"]
-        if moves := get_legal_moves(state, state["turn"], debug=DEBUG):
+        captures, other = state["legal moves"][turn]
+        if moves := captures + other:
             state["can en passant"][state["turn"]] = [False] * 8
             move_choose = white_move_choice if state["turn"] == "white" else black_move_choice
             move = move_choose(state, state["turn"], ply=WPLY if state["turn"] == "white" else BPLY)
@@ -635,7 +656,7 @@ def save_img(img, frame):
 def truncate_board(board):
     return ",".join(["".join([str(peice) for peice in row]) for row in board])    
 
-def check_cache(state, ply, cache, debug=True):
+def check_cache(state, ply, cache=CACHE, Debug=True):
     if CACHE_PLY == False: return
     trunc = truncate_board(state["board"])
     if trunc in cache[state["turn"]]:
@@ -648,17 +669,20 @@ def check_cache(state, ply, cache, debug=True):
             return score
     return None
 
-def cache_score(state, ply, score, cache):
-    if ply < CACHE_PLY: return
+def cache_score(state, ply, score, cache=CACHE):
+    if not CACHE_PLY or ply < CACHE_PLY: return
     trunc = truncate_board(state["board"])
     cache[state["turn"]][trunc] = (ply, score)
 
-def minimax(ply, evaluate_func, state, color, alpha=-1000, beta=1000, debug=False):
-    moves = get_legal_moves(state, state["turn"])
+def minimax(ply, evaluate_func, state, color, alpha=-1000, beta=1000, cache=False, debug=False):
+    get_legal_moves(state, "white", debug=DEBUG)
+    get_legal_moves(state, "black", debug=DEBUG)
+
+    captures, moves = state["legal moves"][state["turn"]]
 
     if check_perpetual(state): return 0, None
 
-    if len(moves) == 0:
+    if len(captures + moves) == 0:
         if in_check(state, state["turn"]):
             if state["turn"] == color:
                 return -100 + ply, None
@@ -666,14 +690,23 @@ def minimax(ply, evaluate_func, state, color, alpha=-1000, beta=1000, debug=Fals
                 return 100 + ply, None
         return 0, None
 
-    if ply == 0:
+
+    if (ply <= 0 and not captures) or (captures and ply <= -5):
         return evaluate_func(state, color), None
-    
+
+
+    moves = captures + moves if ply > 0 else captures
     if state["turn"] == color:
         value_max = -1000
         max_move = None
         for move in moves:
-            value, _ = minimax(ply - 1, evaluate_func, apply_move(state, move), color, alpha, beta, debug=debug)
+            # check cache
+            is_cached = check_cache(state, ply)
+            if is_cached is None:
+                value, _ = minimax(ply-1, evaluate_func, apply_move(state, move), color, alpha, beta, debug=debug)
+                cache_score(state, ply, value)
+            else:
+                value = cache
             if debug:
                 print(ply, state, pretty_print_board(state["board"]))
                 print(alpha, beta, value, value_max)
@@ -689,7 +722,13 @@ def minimax(ply, evaluate_func, state, color, alpha=-1000, beta=1000, debug=Fals
         value_min = 1000
         min_move = None
         for move in moves:
-            value, _ = minimax(ply - 1, evaluate_func, apply_move(state, move), color, alpha, beta, debug=debug)
+            # check cache
+            is_cached = check_cache(state, ply)
+            if cache is not None:
+                value, _ = minimax(ply-1, evaluate_func, apply_move(state, move), color, alpha, beta, debug=debug)
+                cache_score(state, ply, value)
+            else:
+                value = is_cache
             if debug:
                 print(ply, state, pretty_print_board(state["board"]))
                 print(alpha, beta, value, value_min)
@@ -710,10 +749,7 @@ def line_of_sight_points(state, color, debug=False):
         print("analyzing sights")
         pretty_print_board(state["board"])
 
-    moves = {
-        "black": get_moves(state, "black"),
-        "white": get_moves(state, "white"),
-    }
+    moves = state["moves"]
 
     points = {
         "black": 0,

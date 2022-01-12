@@ -417,7 +417,8 @@ def apply_move(state, move):
     
     # en passant check
     if slot1 in 'Pp' and x1 != x2 and slot2 is None:
-        pos = (x, y2-1 if col == "white" else y2+1)
+        pos = (x1, y2-1) if col == "white" else (x1, y2+1)
+        print(pos)
         piece = piece_at(state["board"], pos)
         state["board"][piece].remove(pos)
     
@@ -425,16 +426,25 @@ def apply_move(state, move):
     if slot1 in 'Kk':
         if abs(x2 - x1) > 1:
             if x2 - x1 > 0:
-                state["board"]["R" if col == "white" else "r"].remove((y1, 0))
-                state["board"]["R" if col == "white" else "r"].add((y1, 3))
+                state["board"]["R" if col == "white" else "r"].remove((0, y1))
+                state["board"]["R" if col == "white" else "r"].add((3, y1))
             else:
-                state["board"]["R" if col == "white" else "r"].remove((y1, 7))
-                state["board"]["R" if col == "white" else "r"].add((y1, 5))
+                state["board"]["R" if col == "white" else "r"].remove((7, y1))
+                state["board"]["R" if col == "white" else "r"].add((5, y1))
         state["can castle"][col] = [False, False]
 
-    state["board"][slot1].remove(pos1)
-    state["board"][slot1].add(pos2)
-
+    try:
+        state["board"][slot1].remove(pos1)
+    
+        if slot2:
+            state["board"][slot2].remove(pos2)
+        state["board"][slot1].add(pos2)
+    except KeyError:
+        print("KEY ERROR")
+        print(pos1, pos2)
+        pretty_print_board(state["board"])
+        quit()
+    
     if state["can castle"]['white'][0] and slot1 == "R" and pos1 == (0, 0):
         state["can castle"]['white'][0] = False
     if state["can castle"]['white'][1] and slot1 == "R" and pos1 == (7, 0):
@@ -486,7 +496,9 @@ def check_perpetual(state):
 
 # progromatic move choice
 def random_move(state, color, ply=False):
-    return choice(state["legal moves"][color])
+    get_legal_moves(state, "white", debug=DEBUG)
+    get_legal_moves(state, "black", debug=DEBUG)
+    return choice(state["legal moves"][color][0] + state["legal moves"][color][1])
 def minimax_by_point_value(state, color, ply=3, debug=DEBUG):
     score, move = minimax(ply, point_value, state, color, debug=debug)
     if debug: print("chose", score, move)
@@ -618,7 +630,7 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
             state["can en passant"][state["turn"]] = [False] * 8
             move_choose = white_move_choice if state["turn"] == "white" else black_move_choice
             move = move_choose(state, state["turn"], ply=WPLY if state["turn"] == "white" else BPLY)
-
+            print(move)
             pos1, pos2 = move
             if pos1[1] == 1 and pos2[1] == 3 and piece_at(state["board"], pos1) == "P":
                 state["can en passant"]['black'][pos1[0]] = True
@@ -626,12 +638,14 @@ def run(state, white_move_choice, white_promotion_func, black_move_choice, black
                  state["can en passant"]['white'][pos1[0]] = True
                  
             state = apply_move(state, move)
-
+            get_legal_moves(state, "white", debug=DEBUG)
+            get_legal_moves(state, "black", debug=DEBUG)
+            
             if PIC:
                 FRAME += 1
                 save_img(drawn_board(state), FRAME)
 
-                draw(state)
+            draw(state)
         else:
             return 'Draw'
 
@@ -653,7 +667,7 @@ def save_img(img, frame):
 def truncate_board(board):
     return repr(board)
 
-def check_cache(state, ply, cache=CACHE, Debug=True):
+def check_cache(state, ply, cache=CACHE, debug=False):
     if CACHE_PLY == False: return
     trunc = truncate_board(state["board"])
     if trunc in cache[state["turn"]]:
@@ -688,7 +702,7 @@ def minimax(ply, evaluate_func, state, color, alpha=-1000, beta=1000, cache=Fals
         return 0, None
 
 
-    if (ply <= 0):# and not captures) or (captures and ply <= -5):
+    if (ply <= 0 and not captures) or (captures and ply <= -5):
         return evaluate_func(state, color), None
 
 
@@ -804,6 +818,7 @@ def point_value(state, color, debug=False):
     return score * 2
 
 if __name__ == "__main__":
+    print("Running with White as {w} and Black as {b}".format(w=WHITE, b=BLACK))
     print(
         run(CURRENT_STATE, PLAYERS[WHITE][0], PLAYERS[WHITE][1], PLAYERS[BLACK][0], PLAYERS[BLACK][1])
     )
